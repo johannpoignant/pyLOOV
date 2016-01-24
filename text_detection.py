@@ -1,5 +1,8 @@
 
+import cv, cv2
 from scipy import ndimage
+import numpy as np
+
 
 def sauvola(img):   
     mean = np.mean(img.ravel())
@@ -44,7 +47,7 @@ def text_white_or_black(frame, x1, y1, x2, y2):
     if (blocksize%2 == 0): blocksize+=1
     
     # compute standard deviation if the text is write in white
-    img1 = np.copy(frameGray[y1:y2, x1:x2])    
+    img1 = np.copy(frame[y1:y2, x1:x2])    
     img1 = cv2.adaptiveThreshold(img1,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, blocksize, 2)
     cv2.rectangle(img1, (0,0), (x2-x1, y2-y1), 0, 1, 1, 0)
 
@@ -52,7 +55,7 @@ def text_white_or_black(frame, x1, y1, x2, y2):
     size_cc1 = np.bincount(label_cc1.ravel())[1:]
     
     # compute standard deviation if the text is write in black
-    img2 = np.copy(frameGray[y1:y2, x1:x2])
+    img2 = np.copy(frame[y1:y2, x1:x2])
     img2 = cv2.bitwise_not(img2)    
     img2 = cv2.adaptiveThreshold(img2,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, blocksize, 2)
     cv2.rectangle(img2, (0,0), (x2-x1, y2-y1), 255, 1, 1, 0)
@@ -115,7 +118,7 @@ def find_y_position(frame, x1, x2, y1, y2, text_white):
     return sorted(l, reverse = True)[0][1:]
 
 
-def spatial_detection_LOOV(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText):
+def spatial_detection_LOOV(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText, marginCoarseDetectionX, marginCoarseDetectionY, minRatioWidthHeight):
     newBoxes = []
     # for each connected component
     contours = find_connected_component(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText)
