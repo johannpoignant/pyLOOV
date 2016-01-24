@@ -12,9 +12,9 @@ Options:
   --endpos=<frameID>                last frame to process, [default: -1]
   --onlyTextDetection               process only the text detection, [default: False]
   --thresholdSobel=<Thr>            value of the threshold sobel, [default: 103]
-  --itConnectedCaractere=<it>       iteration number for the connection of the edges of characters after the sobel operator, calculation : iteration = 352(width of the image) * 0.0284(itConnectedCaractere) = 9 iterations, [default: 0.02682]
-  --yMinSizeText=<thr>              minimum pixel height of a box, calculation : iteration = 288(height of the image) * 0.0056(yMinSizeText) = 1, [default: 0.0056]
-  --xMinSizeText=<thr>              minimum pixel width of a box, calculation : iteration = 352(width of the image) * 0.0466(xMinSizeText) = 16, [default: 0.0466]
+  --itConnectedCaractere=<it>       iteration number for the connection of the edges of characters after the sobel operator, calculation : iteration = 352(width of the image) * 0.03(itConnectedCaractere) = 11 iterations, [default: 0.03]
+  --yMinSizeText=<thr>              minimum pixel height of a box, calculation : iteration = 288(height of the image) * 0.02(yMinSizeText) = 6, [default: 0.02]
+  --xMinSizeText=<thr>              minimum pixel width of a box, calculation : iteration = 352(width of the image) * 0.05(xMinSizeText) = 18, [default: 0.05]
   --minRatioWidthHeight=<thr>       minimum ratio between height and width of a text box, [default: 2.275]
   --marginCoarseDetectionY=<marge>  margin arround the box after coarse detection, calculation : margin = 10(height of the image box) * 0.5(marginCoarseDetectionY) = 5 pixels, [default: 0.5]
   --marginCoarseDetectionX=<marge>  margin arround the box after coarse detection, calculation : margin = 10(height of the image) * 1(marginCoarseDetectionX) = 10 pixels, [default: 1.0]
@@ -24,7 +24,8 @@ Options:
   --maxValDiffBetween2boxes=<thr>   max value in average color between two box compared, [default: 20.0]
   --freqReco=<freq>                 make text recognition every freqReco frames, [default: 10]
   --resizeOCRImage=<size>           height of the image box after bicubic interpolation, [default: 200]
-"""]
+"""
+
 
 from docopt import docopt
 import numpy as np
