@@ -2,8 +2,8 @@
 Video text extractor
 
 Usage:
-  face_tracker.py <video> <output> 
-
+  pyLOOV.py <video> <output>   [--mask=<path>] [--traindata=<path>] [--ss=<frameID>] [--endpos=<frameID>] [--onlyTextDetection] [--thresholdSobel=<Thr>] [--itConnectedCaractere=<it>] [--yMinSizeText=<thr>] [--xMinSizeText=<thr>] [--minRatioWidthHeight=<thr>] [--marginCoarseDetectionY=<marge>] [--marginCoarseDetectionX=<marge>] [--tolBox=<thr>] [--minDurationBox=<thr>] [--maxGapBetween2frames=<thr>] [--maxValDiffBetween2boxes=<thr>] [--freqReco=<freq>] [--resizeOCRImage=<size>] 
+  pyLOOV.py -h | --help
 Options:
   -h --help                         Show this screen.
   --mask=<path>                     image in black and white to process only a subpart of the image
@@ -34,6 +34,7 @@ import os
 from collections import deque
 
 from box_image import *
+from text_detection import *
 
 if __name__ == '__main__':
     # read arguments
@@ -66,50 +67,48 @@ if __name__ == '__main__':
 
     # open video
     capture = cv2.VideoCapture(video)
-    ret, frame = capture.read()
-    lastFrameCapture = int(cv2.VideoCapture.get(cv.CV_CAP_PROP_FRAME_COUNT))
+    lastFrameCapture = int(capture.get(cv.CV_CAP_PROP_FRAME_COUNT))
 
     # check if ss and endpos are inside the video
     if ss >= lastFrameCapture: raise ValueError("the video lengh ("+str(lastFrameCapture)+") is under ss position("+str(ss)+")")
     if endpos == -1: endpos = lastFrameCapture
     if endpos > lastFrameCapture: raise ValueError("the last frame to process("+str(endpos)+") is higher than the video lengh ("+str(lastFrameCapture)+")")
 
+    frameId = -1
+    while (frameId<ss-1):
+        ret, frame = capture.read()                             # get next frame
+        frameId = int(capture.get(cv.CV_CAP_PROP_POS_FRAMES)) 
+
     # adapt parameters to the image size
     height, width, channels = frame.shape
-    itConnectedCaractere = int(round(width*aspect_ratio*it_connected_caractere, 0))
+    itConnectedCaractere = int(round(width*itConnectedCaractere, 0))
     yMinSizeText = int(round(height*yMinSizeText, 0))
-    xMinSizeText = int(round(width*aspect_ratio*xMinSizeText, 0))
+    xMinSizeText = int(round(width*xMinSizeText, 0))
 
     # read video
     Boxes = []
-    ImageQueue = deque([frame], maxlen=maxValDiffBetween2boxes)
+    imageQueue = deque([], maxlen=maxValDiffBetween2boxes+1)
+
     print "processing of frames from", ss, "to", endpos
-    while (frameId<last_frame_to_process):
+    while (frameId<endpos):
         ret, frame = capture.read()                             # get next frame
         if ret:
             frameId = int(capture.get(cv.CV_CAP_PROP_POS_FRAMES))
-            frameGray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            ######################## check aspect ratio #################################
-
-            ImageQueue.append(frameGray)
-
-
-            newBoxes =  spatial_detection_LOOV(frameGray, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText)
-
-            temporal_detection(newBoxes, Boxes, ImageQueue, frameID, maxGapBetween2frames)
-
-            if len(ImageQueue)>maxValDiffBetween2boxes:
-                ImageQueue.popleft()
-
-
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            imageQueue.appendleft(frame)
+            BoxesDetected = spatial_detection_LOOV(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText, marginCoarseDetectionX, marginCoarseDetectionY, minRatioWidthHeight)
+            Boxes         = temporal_detection(BoxesDetected, Boxes, imageQueue, frameId, maxGapBetween2frames, tolBox, maxValDiffBetween2boxes)
+            if len(imageQueue)>maxValDiffBetween2boxes+1:  imageQueue.pop()
+        else:
+            imageQueue.appendleft(frame)
+            if len(imageQueue)>maxValDiffBetween2boxes+1: imageQueue.pop()            
     capture.release()
 
     # process transcription
-    for b in Boxes:
-        b.sort_image()
-        if onlyTextDetection: continue
-        b.compute_mean_images(freqReco)
-        b.OCR()
+    if not onlyTextDetection:
+        for b in Boxes:
+            b.compute_mean_images(freqReco)
+            b.OCR()
 
     # save boxes
     for b in Boxes:

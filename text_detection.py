@@ -1,7 +1,84 @@
 
 import cv, cv2
 from scipy import ndimage
+
 import numpy as np
+
+class box:
+    """ list of box image of the same text
+    transcriptions: list of transcriptions obtained by the OCR
+    lx1, ly1: top left corner
+    lx2, ly2: bottom right corner
+    meanx1, meany1, meanx2, meany2: mean value of the position
+    lframeId: frameId
+    limg: image of the boxes
+    ldetected: is the box has been detected in the image
+    finish: is the boxes is dead
+    """
+
+    def __init__(self, x1, y1, x2, y2, frameId, img):
+        self.transcriptions = []
+        self.lx1 = [x1]
+        self.ly1 = [y1]
+        self.lx2 = [x2]
+        self.ly2 = [y2]
+        self.meanx1, self.meany1, self.meanx2, self.meany2 = float(x1), float(y1), float(x2), float(y2)
+        self.lframeId = [frameId]
+        self.limage = [img]
+        self.ldetected = [True]
+        self.nbDetected = 1.
+        self.lastFrameIdDetected = frameId 
+        self.finish = False
+        self.transcriptions = []
+
+    def add_detected_box(self, x1, y1, x2, y2, frameId, frame):
+        self.lx1.append(x1)
+        self.ly1.append(y1)
+        self.lx2.append(x2)
+        self.ly2.append(y2)
+        self.lframeId.append(frameId)
+        img = np.copy(frame[y1:y2, x1:x2]) 
+        self.limage.append(img)
+        self.ldetected.append(True)
+        self.meanx1 = (self.meanx1 * self.nbDetected + float(x1)) / (self.nbDetected+1)
+        self.meany1 = (self.meany1 * self.nbDetected + float(y1)) / (self.nbDetected+1)
+        self.meanx2 = (self.meanx2 * self.nbDetected + float(x2)) / (self.nbDetected+1)
+        self.meany2 = (self.meany2 * self.nbDetected + float(y2)) / (self.nbDetected+1)
+        self.nbDetected+=1.
+
+    def fill_gap(self, frameId, frame):
+        # fill the gap between image
+        self.lx1.append(self.meanx1)
+        self.ly1.append(self.meany1)
+        self.lx2.append(self.meanx2)
+        self.ly2.append(self.meany2)
+        self.lframeId.append(frameId)
+        img = np.copy(frame[self.meany1:self.meany2, self.meanx1:self.meanx2]) 
+        self.limage.append(img)
+        self.ldetected.append(False)
+
+    def compute_mean_images(self, freqReco):
+        # compute mean image every freqReco frame
+        pass
+
+    def OCR(self, ):
+        # process OCR on mean images
+        pass
+
+    def save(self, output):
+        # write transcription on file
+        output.write("")
+
+
+        pass
+
+    def __repr__(self):
+        """print the last detection of the box"""
+        return "last values: x1({}), y2({}), x2({}), y2({}), frameId({})".format(
+                self.lx1[-1], self.ly1[-1], self.lx2[-1], self.ly2[-1], self.lframeId[-1])
+
+
+
 
 
 def sauvola(img):   
@@ -119,7 +196,7 @@ def find_y_position(frame, x1, x2, y1, y2, text_white):
 
 
 def spatial_detection_LOOV(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText, marginCoarseDetectionX, marginCoarseDetectionY, minRatioWidthHeight):
-    newBoxes = []
+    BoxesDetected = []
     # for each connected component
     contours = find_connected_component(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText)
     for c in contours:
@@ -146,30 +223,62 @@ def spatial_detection_LOOV(frame, mask, height, width, thresholdSobel, itConnect
 
         if (x2-x1) < minRatioWidthHeight*(y2-y1): continue
 
-        newBoxes.append([x1, y1, x2, y2])
+        BoxesDetected.append([x1, y1, x2, y2])
 
-    return newBoxes
+    return BoxesDetected
 
 
-def temporal_detection(newBoxes, Boxes, ImageQueue, frameID, maxGapBetween2frames):
+def find_existing_boxes(x1, y1, x2, y2, imageQueue, frameId, Boxes, tolBox, maxValDiffBetween2boxes):
+    for b in Boxes:
+        if b.finish: continue
+
+        # compare position
+        x1Inter = max(x1, b.meanx1)
+        y1Inter = max(y1, b.meany1)
+        x2Inter = min(x2, b.meanx2)
+        y2Inter = min(y2, b.meany2)
+
+        if x1Inter>x2Inter or y1Inter>y2Inter : continue
+
+        areaInter = (x2Inter-x1Inter)*(y2Inter-y1Inter)
+        areaNewBox = (x2-x1)*(y2-y1)
+        areab = (b.meanx2-b.meanx1)*(b.meany2-b.meany1)
+
+        if areaInter/(areaNewBox+areab-areaInter) < tolBox: continue
+
+        # compare image
+        imgNewBox = imageQueue[0][y1Inter:y2Inter, x1Inter:x2Inter]
+
+        imgb = imageQueue[frameId - b.lframeId[-1]][y1Inter:y2Inter, x1Inter:x2Inter]
+
+        if np.mean(cv2.absdiff(imgNewBox, imgb).ravel()) < maxValDiffBetween2boxes: continue
+
+        return b
+    return False
+
+def temporal_detection(BoxesDetected, Boxes, imageQueue, frameId, maxGapBetween2frames, tolBox, maxValDiffBetween2boxes):
+    # if new boxes correspond to existing boxes, add to them, else create a new one
+    newBoxes = []
+    for x1, y1, x2, y2 in BoxesDetected:
+        boxFind = find_existing_boxes(x1, y1, x2, y2, imageQueue, frameId, Boxes, tolBox, maxValDiffBetween2boxes)
+        if boxFind:
+            for i in range(boxFind.lframeId[-1]+1, frameId):
+                boxFind.fill_gap(i, imageQueue[frameId-i])
+            boxFind.add_detected_box(x1, y1, x2, y2, frameId, imageQueue[0])
+        else:
+            newBoxes.append([x1, y1, x2, y2])
+
+    # for those neither existing boxes was found, create a newBoxes object
+    for x1, y1, x2, y2 in newBoxes:
+        newb = box(x1, y1, x2, y2, frameId, imageQueue[0])
+        Boxes.append(newb)
 
     # check if boxes are finished
     for b in Boxes:
         if b.finish: continue
-        b.finished(frameID, maxGapBetween2frames)
+        if frameId - b.lastFrameIdDetected > maxGapBetween2frames: b.finish = True
 
-    # if new boxes correspond to existing boxes, add to them, else create a new one
-    for newb in newBoxes:
-        find=False
-        for b in Boxes:
-            if b.finish: continue
-            if compare_boxes(newb, b):
-                b.add_box(newb)
-                b.fill_gap(ImageQueue)
-                find=True
-                break
-        if not find:
-            newb = box_image(newb)
-            Boxes.append(newb)
+    return Boxes
+
 
 
