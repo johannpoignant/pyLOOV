@@ -33,7 +33,6 @@ import cv, cv2
 import os
 from collections import deque
 
-from box_image import *
 from text_detection import *
 
 if __name__ == '__main__':
@@ -86,7 +85,7 @@ if __name__ == '__main__':
     xMinSizeText = int(round(width*xMinSizeText, 0))
 
     # read video
-    Boxes = []
+    boxes = []
     imageQueue = deque([], maxlen=maxValDiffBetween2boxes+1)
 
     print "processing of frames from", ss, "to", endpos
@@ -96,21 +95,27 @@ if __name__ == '__main__':
             frameId = int(capture.get(cv.CV_CAP_PROP_POS_FRAMES))
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             imageQueue.appendleft(frame)
-            BoxesDetected = spatial_detection_LOOV(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText, marginCoarseDetectionX, marginCoarseDetectionY, minRatioWidthHeight)
-            Boxes         = temporal_detection(BoxesDetected, Boxes, imageQueue, frameId, maxGapBetween2frames, tolBox, maxValDiffBetween2boxes)
+            boxesDetected = spatial_detection_LOOV(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText, marginCoarseDetectionX, marginCoarseDetectionY, minRatioWidthHeight)
+            boxes         = temporal_detection(boxesDetected, boxes, imageQueue, frameId, maxGapBetween2frames, tolBox, maxValDiffBetween2boxes)
             if len(imageQueue)>maxValDiffBetween2boxes+1:  imageQueue.pop()
         else:
             imageQueue.appendleft(frame)
             if len(imageQueue)>maxValDiffBetween2boxes+1: imageQueue.pop()            
     capture.release()
 
+    boxesFinal = []
+    #select only box with a good duration
+    for b in boxes:
+        if b.lframeId[-1] - b.lframeId[0] >=  minDurationBox:
+            boxesFinal.append(b)
+
     # process transcription
     if not onlyTextDetection:
-        for b in Boxes:
+        for b in boxesFinal:
             b.compute_mean_images(freqReco)
             b.OCR()
 
     # save boxes
-    for b in Boxes:
+    for b in boxesFinal:
         b.save(output)
     output.close()

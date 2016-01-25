@@ -6,17 +6,18 @@ import numpy as np
 
 class box:
     """ list of box image of the same text
-    transcriptions: list of transcriptions obtained by the OCR
     lx1, ly1: top left corner
     lx2, ly2: bottom right corner
     meanx1, meany1, meanx2, meany2: mean value of the position
     lframeId: frameId
-    limg: image of the boxes
-    ldetected: is the box has been detected in the image
+    limage: image of the boxes
+    ldetected: is the box has been detected in the image (True or False)
+    nbDetected: number of box that are detected
     finish: is the boxes is dead
+    transcriptions: list of transcriptions obtained by the OCR
     """
 
-    def __init__(self, x1, y1, x2, y2, frameId, img):
+    def __init__(self, x1, y1, x2, y2, frameId, frame):
         self.transcriptions = []
         self.lx1 = [x1]
         self.ly1 = [y1]
@@ -24,10 +25,9 @@ class box:
         self.ly2 = [y2]
         self.meanx1, self.meany1, self.meanx2, self.meany2 = float(x1), float(y1), float(x2), float(y2)
         self.lframeId = [frameId]
-        self.limage = [img]
+        self.limage = [frame[y1:y2, x1:x2]]
         self.ldetected = [True]
         self.nbDetected = 1.
-        self.lastFrameIdDetected = frameId 
         self.finish = False
         self.transcriptions = []
 
@@ -67,7 +67,7 @@ class box:
 
     def save(self, output):
         # write transcription on file
-        output.write("")
+        # output.write("")
 
 
         pass
@@ -196,7 +196,7 @@ def find_y_position(frame, x1, x2, y1, y2, text_white):
 
 
 def spatial_detection_LOOV(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText, marginCoarseDetectionX, marginCoarseDetectionY, minRatioWidthHeight):
-    BoxesDetected = []
+    boxesDetected = []
     # for each connected component
     contours = find_connected_component(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText)
     for c in contours:
@@ -223,13 +223,13 @@ def spatial_detection_LOOV(frame, mask, height, width, thresholdSobel, itConnect
 
         if (x2-x1) < minRatioWidthHeight*(y2-y1): continue
 
-        BoxesDetected.append([x1, y1, x2, y2])
+        boxesDetected.append([x1, y1, x2, y2])
 
-    return BoxesDetected
+    return boxesDetected
 
 
-def find_existing_boxes(x1, y1, x2, y2, imageQueue, frameId, Boxes, tolBox, maxValDiffBetween2boxes):
-    for b in Boxes:
+def find_existing_boxes(x1, y1, x2, y2, imageQueue, frameId, boxes, tolBox, maxValDiffBetween2boxes):
+    for b in boxes:
         if b.finish: continue
 
         # compare position
@@ -251,16 +251,16 @@ def find_existing_boxes(x1, y1, x2, y2, imageQueue, frameId, Boxes, tolBox, maxV
 
         imgb = imageQueue[frameId - b.lframeId[-1]][y1Inter:y2Inter, x1Inter:x2Inter]
 
-        if np.mean(cv2.absdiff(imgNewBox, imgb).ravel()) < maxValDiffBetween2boxes: continue
+        if np.mean(cv2.absdiff(imgNewBox, imgb).ravel()) > maxValDiffBetween2boxes: continue
 
         return b
     return False
 
-def temporal_detection(BoxesDetected, Boxes, imageQueue, frameId, maxGapBetween2frames, tolBox, maxValDiffBetween2boxes):
+def temporal_detection(boxesDetected, boxes, imageQueue, frameId, maxGapBetween2frames, tolBox, maxValDiffBetween2boxes):
     # if new boxes correspond to existing boxes, add to them, else create a new one
     newBoxes = []
-    for x1, y1, x2, y2 in BoxesDetected:
-        boxFind = find_existing_boxes(x1, y1, x2, y2, imageQueue, frameId, Boxes, tolBox, maxValDiffBetween2boxes)
+    for x1, y1, x2, y2 in boxesDetected:
+        boxFind = find_existing_boxes(x1, y1, x2, y2, imageQueue, frameId, boxes, tolBox, maxValDiffBetween2boxes)
         if boxFind:
             for i in range(boxFind.lframeId[-1]+1, frameId):
                 boxFind.fill_gap(i, imageQueue[frameId-i])
@@ -271,14 +271,14 @@ def temporal_detection(BoxesDetected, Boxes, imageQueue, frameId, maxGapBetween2
     # for those neither existing boxes was found, create a newBoxes object
     for x1, y1, x2, y2 in newBoxes:
         newb = box(x1, y1, x2, y2, frameId, imageQueue[0])
-        Boxes.append(newb)
+        boxes.append(newb)
 
     # check if boxes are finished
-    for b in Boxes:
+    for b in boxes:
         if b.finish: continue
-        if frameId - b.lastFrameIdDetected > maxGapBetween2frames: b.finish = True
+        if frameId - b.lframeId[-1] > maxGapBetween2frames: b.finish = True
 
-    return Boxes
+    return boxes
 
 
 
