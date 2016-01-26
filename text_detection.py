@@ -1,84 +1,87 @@
-
 import cv, cv2
-from scipy import ndimage
-
+import tesserpy
 import numpy as np
+from scipy import ndimage
+import json
 
 class box:
     """ list of box image of the same text
     lx1, ly1: top left corner
     lx2, ly2: bottom right corner
     meanx1, meany1, meanx2, meany2: mean value of the position
+    lenghtInter: size after interpolation
     lframeId: frameId
-    limage: image of the boxes
     ldetected: is the box has been detected in the image (True or False)
     nbDetected: number of box that are detected
     finish: is the boxes is dead
-    transcriptions: list of transcriptions obtained by the OCR
+    nbDetected: # detection
+    lframe: list of images
     """
 
-    def __init__(self, x1, y1, x2, y2, frameId, frame):
-        self.transcriptions = []
+    def __init__(self, x1, y1, x2, y2, frameId):
         self.lx1 = [x1]
         self.ly1 = [y1]
         self.lx2 = [x2]
         self.ly2 = [y2]
         self.meanx1, self.meany1, self.meanx2, self.meany2 = float(x1), float(y1), float(x2), float(y2)
         self.lframeId = [frameId]
-        self.limage = [frame[y1:y2, x1:x2]]
-        self.ldetected = [True]
-        self.nbDetected = 1.
         self.finish = False
-        self.transcriptions = []
+        self.nbDetected = 1
+        self.lframe = [] 
+        self.lenghtInter = 0
 
-    def add_detected_box(self, x1, y1, x2, y2, frameId, frame):
+    def add_detected_box(self, x1, y1, x2, y2, frameId):
         self.lx1.append(x1)
         self.ly1.append(y1)
         self.lx2.append(x2)
         self.ly2.append(y2)
         self.lframeId.append(frameId)
-        img = np.copy(frame[y1:y2, x1:x2]) 
-        self.limage.append(img)
-        self.ldetected.append(True)
         self.meanx1 = (self.meanx1 * self.nbDetected + float(x1)) / (self.nbDetected+1)
         self.meany1 = (self.meany1 * self.nbDetected + float(y1)) / (self.nbDetected+1)
         self.meanx2 = (self.meanx2 * self.nbDetected + float(x2)) / (self.nbDetected+1)
         self.meany2 = (self.meany2 * self.nbDetected + float(y2)) / (self.nbDetected+1)
-        self.nbDetected+=1.
+        self.nbDetected += 1
 
-    def fill_gap(self, frameId, frame):
-        # fill the gap between image
-        self.lx1.append(self.meanx1)
-        self.ly1.append(self.meany1)
-        self.lx2.append(self.meanx2)
-        self.ly2.append(self.meany2)
-        self.lframeId.append(frameId)
-        img = np.copy(frame[self.meany1:self.meany2, self.meanx1:self.meanx2]) 
-        self.limage.append(img)
-        self.ldetected.append(False)
+    def OCR(self, freqReco, tess, resizeOCRImage):
+        d = {}
+        d["x"] = self.meanx1
+        d["y"] = self.meany1
+        d["w"] = self.meanx2-self.meanx1
+        d["h"] = self.meany1-self.meany1
 
-    def compute_mean_images(self, freqReco):
-        # compute mean image every freqReco frame
-        pass
-
-    def OCR(self, ):
         # process OCR on mean images
-        pass
+        img = np.array(np.average(np.array(self.lframe), axis=0), dtype=np.uint8)
+        img = cv2.resize(img, (self.lenghtInter, resizeOCRImage) , interpolation=cv2.INTER_CUBIC)
+        tess.set_image(img)
+        d["transcriptions"] = {}
+        d["confidences"] = {}
+        d["transcriptions"][str(self.lframeId[0])+"_to_"+str(self.lframeId[-1])] = tess.get_utf8_text().replace('\n', '')
+        d["confidences"][str(self.lframeId[0])+"_to_"+str(self.lframeId[-1])] = [int(round(c.confidence, 0)) for c in tess.symbols()]
 
-    def save(self, output):
-        # write transcription on file
-        # output.write("")
+        # process OCR on intermediate images
+        for i in range(int(len(self.lframe)/freqReco)):
+            img = np.array(np.average(np.array(self.lframe[i*freqReco:(i+1)*freqReco]), axis=0), dtype=np.uint8)
+            img = cv2.resize(img, (self.lenghtInter, resizeOCRImage) , interpolation=cv2.INTER_CUBIC)
+            tess.set_image(img)
+            d["transcriptions"][str(self.lframeId[i*freqReco])+"_to_"+str(self.lframeId[(i+1)*freqReco-1])] = tess.get_utf8_text().replace('\n', '')
+            d["confidences"][str(self.lframeId[i*freqReco])+"_to_"+str(self.lframeId[(i+1)*freqReco-1])] = [int(round(c.confidence, 0)) for c in tess.symbols()]
+            #transcriptions.append(tess.get_utf8_text().replace('\n', ''))
+            #confidences.append([int(round(c.confidence, 0)) for c in tess.symbols()])
 
-
-        pass
+        if (i+1)*freqReco < len(self.lframe):
+            img = np.array(np.average(np.array(self.lframe[(i+1)*freqReco:]), axis=0), dtype=np.uint8)
+            img = cv2.resize(img, (self.lenghtInter, resizeOCRImage) , interpolation=cv2.INTER_CUBIC)
+            tess.set_image(img)
+            d["transcriptions"][str(self.lframeId[(i+1)*freqReco])+"_to_"+str(self.lframeId[-1])] = tess.get_utf8_text().replace('\n', '')
+            d["confidences"][str(self.lframeId[(i+1)*freqReco])+"_to_"+str(self.lframeId[-1])] = [int(round(c.confidence, 0)) for c in tess.symbols()]
+            #transcriptions.append(tess.get_utf8_text().replace('\n', ''))
+            #confidences.append([int(round(c.confidence, 0)) for c in tess.symbols()])
+        return d
 
     def __repr__(self):
         """print the last detection of the box"""
         return "last values: x1({}), y2({}), x2({}), y2({}), frameId({})".format(
                 self.lx1[-1], self.ly1[-1], self.lx2[-1], self.ly2[-1], self.lframeId[-1])
-
-
-
 
 
 def sauvola(img):   
@@ -262,15 +265,13 @@ def temporal_detection(boxesDetected, boxes, imageQueue, frameId, maxGapBetween2
     for x1, y1, x2, y2 in boxesDetected:
         boxFind = find_existing_boxes(x1, y1, x2, y2, imageQueue, frameId, boxes, tolBox, maxValDiffBetween2boxes)
         if boxFind:
-            for i in range(boxFind.lframeId[-1]+1, frameId):
-                boxFind.fill_gap(i, imageQueue[frameId-i])
-            boxFind.add_detected_box(x1, y1, x2, y2, frameId, imageQueue[0])
+            boxFind.add_detected_box(x1, y1, x2, y2, frameId)
         else:
             newBoxes.append([x1, y1, x2, y2])
 
     # for those neither existing boxes was found, create a newBoxes object
     for x1, y1, x2, y2 in newBoxes:
-        newb = box(x1, y1, x2, y2, frameId, imageQueue[0])
+        newb = box(x1, y1, x2, y2, frameId)
         boxes.append(newb)
 
     # check if boxes are finished

@@ -2,12 +2,13 @@
 Video text extractor
 
 Usage:
-  pyLOOV.py <video> <output>   [--mask=<path>] [--traindata=<path>] [--ss=<frameID>] [--endpos=<frameID>] [--onlyTextDetection] [--thresholdSobel=<Thr>] [--itConnectedCaractere=<it>] [--yMinSizeText=<thr>] [--xMinSizeText=<thr>] [--minRatioWidthHeight=<thr>] [--marginCoarseDetectionY=<marge>] [--marginCoarseDetectionX=<marge>] [--tolBox=<thr>] [--minDurationBox=<thr>] [--maxGapBetween2frames=<thr>] [--maxValDiffBetween2boxes=<thr>] [--freqReco=<freq>] [--resizeOCRImage=<size>] 
+  pyLOOV.py <video> <output>   [--mask=<path>] [--tessdata=<path>] [--lang=<abc>] [--ss=<frameID>] [--endpos=<frameID>] [--onlyTextDetection] [--thresholdSobel=<Thr>] [--itConnectedCaractere=<it>] [--yMinSizeText=<thr>] [--xMinSizeText=<thr>] [--minRatioWidthHeight=<thr>] [--marginCoarseDetectionY=<marge>] [--marginCoarseDetectionX=<marge>] [--tolBox=<thr>] [--minDurationBox=<thr>] [--maxGapBetween2frames=<thr>] [--maxValDiffBetween2boxes=<thr>] [--freqReco=<freq>] [--resizeOCRImage=<size>] 
   pyLOOV.py -h | --help
 Options:
   -h --help                         Show this screen.
   --mask=<path>                     image in black and white to process only a subpart of the image
-  --traindata=<path>                path to tessdata, [default: /usr/local/share/tessdata/fra.traineddata]
+  --tessdata=<path>                 path to tessdata, [default: /usr/local/share/tessdata/]
+  --lang=<abc>                      language [default: eng]
   --ss=<frameID>                    start frame to process, [default: 0]
   --endpos=<frameID>                last frame to process, [default: -1]
   --onlyTextDetection               process only the text detection, [default: False]
@@ -40,10 +41,11 @@ if __name__ == '__main__':
     args = docopt(__doc__)
     # parse arguments
     video                   = args['<video>']
-    output                  = open(args['<output>'], 'w')
+    output                  = args['<output>']
     if args['--mask']: mask = cv2.rimead(args['--mask'])
     else:              mask = False
-    traineddata             = args['--traindata']
+    tessdata                = args['--tessdata']
+    lang                    = args['--lang']
     onlyTextDetection       = args['--onlyTextDetection']
     ss                      = int(args['--ss'])
     endpos                  = int(args['--endpos'])
@@ -62,7 +64,10 @@ if __name__ == '__main__':
     resizeOCRImage          = int(args['--resizeOCRImage'])
 
     # check if the character recognition model is found
-    if not os.path.isfile(traineddata): raise ValueError(traineddata+" could not be found")
+    if not onlyTextDetection:
+        if not os.path.isfile(tessdata+"/"+lang+".traineddata"): raise ValueError(tessdata+" could not be found")
+        tess = tesserpy.Tesseract(tessdata, language=lang)
+        tess.tessedit_char_whitelist = """'"!@#$%^&*()_+-=[]{};,.<>/?`~abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"""
 
     # open video
     capture = cv2.VideoCapture(video)
@@ -93,6 +98,12 @@ if __name__ == '__main__':
         ret, frame = capture.read()                             # get next frame
         if ret:
             frameId = int(capture.get(cv.CV_CAP_PROP_POS_FRAMES))
+
+            print frameId, len(boxes)
+
+            ############################# penser au mask ###############################
+
+
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             imageQueue.appendleft(frame)
             boxesDetected = spatial_detection_LOOV(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText, marginCoarseDetectionX, marginCoarseDetectionY, minRatioWidthHeight)
@@ -104,18 +115,42 @@ if __name__ == '__main__':
     capture.release()
 
     boxesFinal = []
+
     #select only box with a good duration
     for b in boxes:
         if b.lframeId[-1] - b.lframeId[0] >=  minDurationBox:
+            # calcul lengh of the resized image
+            b.lenghtInter = int(round( resizeOCRImage*(b.meanx2-b.meanx1)/(b.meany2-b.meany1)))
+            # fill gap of the list of frameId
+            b.lframeId = range(b.lframeId[0], b.lframeId[-1]) 
             boxesFinal.append(b)
 
+    # read the video a second time to get the ROI images corresponding to boxes
+    capture = cv2.VideoCapture(video)
+    frameId = -1
+    while (frameId<ss-1):
+        ret, frame = capture.read()                             # get next frame
+        frameId = int(capture.get(cv.CV_CAP_PROP_POS_FRAMES)) 
+
+    while (frameId<endpos):
+        ret, frame = capture.read()                             # get next frame
+        if not ret: continue
+        frameId = int(capture.get(cv.CV_CAP_PROP_POS_FRAMES))
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  
+        for b in boxesFinal:
+            if frameId >= b.lframeId[0] and frameId <= b.lframeId[-1]:
+                img = np.copy(frame[b.meany1:b.meany2, b.meanx1:b.meanx2]) 
+                b.lframe.append(img)
+    capture.release()
+
     # process transcription
+    d = {}
+    i=0    
     if not onlyTextDetection:
         for b in boxesFinal:
-            b.compute_mean_images(freqReco)
-            b.OCR()
+            d[i] = b.OCR(freqReco, tess, resizeOCRImage)
+            i+=1
 
-    # save boxes
-    for b in boxesFinal:
-        b.save(output)
-    output.close()
+    with open(output, 'w') as fp:
+        json.dump(d, fp)
+
