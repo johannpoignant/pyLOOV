@@ -191,5 +191,5 @@ if __name__ == '__main__':
     # save the output in json format
     with io.open(output, 'w', encoding='utf-8') as f:
         #json.dump(d, f, sort_keys = True, indent = 4)
-        f.write(unicode(json.dumps(d, ensure_ascii=False)))
+        f.write(unicode(json.dumps(d, sort_keys = True, indent = 4, ensure_ascii=False)))
 
