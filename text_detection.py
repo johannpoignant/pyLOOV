@@ -1,8 +1,10 @@
+#!/usr/bin/env python
+# encoding: utf-8
+
 import cv, cv2
 import tesserpy
 import numpy as np
 from scipy import ndimage
-import json
 
 class box:
     """ list of box image of the same text
@@ -19,10 +21,7 @@ class box:
     """
 
     def __init__(self, x1, y1, x2, y2, frameId):
-        self.lx1 = [x1]
-        self.ly1 = [y1]
-        self.lx2 = [x2]
-        self.ly2 = [y2]
+        self.lx1, self.ly1, self.lx2, self.ly2 = [x1], [y1], [x2], [y2]
         self.meanx1, self.meany1, self.meanx2, self.meany2 = float(x1), float(y1), float(x2), float(y2)
         self.lframeId = [frameId]
         self.finish = False
@@ -43,17 +42,22 @@ class box:
         self.nbDetected += 1
 
     def OCR(self, freqReco, tess, resizeOCRImage, idBoxes):
+        """Process OCR on an image corresponding to the avergage images along the 
+        whole boxes and also OCR on intermediate images every freqReco return a 
+        dictionnary with all transcriptions, theconfidence for each characters
+        and the position of the box"""
         d = {}
         d["x"] = self.meanx1
         d["y"] = self.meany1
         d["w"] = self.meanx2-self.meanx1
         d["h"] = self.meany1-self.meany1
+        d["startFrame"] = self.lframeId[0]
+        d["endFrame"] = self.lframeId[-1]
 
         # process OCR on mean images
         img = np.array(np.average(np.array(self.lframe), axis=0), dtype=np.uint8)
         img = cv2.resize(img, (self.lenghtInter, resizeOCRImage) , interpolation=cv2.INTER_CUBIC)
         _, img = cv2.threshold(img, sauvola(img), 255, cv.CV_THRESH_BINARY)
-
         tess.set_image(img)
         d["transcriptions"] = {}
         d["confidences"] = {}
@@ -87,12 +91,14 @@ class box:
 
 
 def sauvola(img):   
+    """ compute a threshold base on an approximation of the Sauvola method """
     mean = np.mean(img.ravel())
     if mean-127.5 < 0: mean = abs(mean-127.5)+127.5
     else:              mean = 255 - mean
     return 255-round(mean*(1+0.5*(np.std(img.ravel()) /127.5 - 1)), 0)
 
 def find_connected_component(frame, applyMask, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText):
+    """Coarse detection on the whole frame, base on the vertical edge"""
     # find vertical edge of characters
     img = cv2.Sobel(frame, cv.CV_8U, 1, 0, ksize=1)
     cv2.rectangle(img, (0,0), (width, height), (0,0,0), 2, 4, 0)
@@ -127,7 +133,7 @@ def find_connected_component(frame, applyMask, mask, height, width, thresholdSob
     return  contours  
 
 def text_white_or_black(frame, x1, y1, x2, y2):
-    #find if the text is write in black or in white
+    """find if the text is write in black or in white"""
     blocksize = y2-y1
     if (blocksize%2 == 0): blocksize+=1
     
@@ -153,6 +159,7 @@ def text_white_or_black(frame, x1, y1, x2, y2):
     return True
 
 def find_x_position(frame, x1, x2, y1, y2, text_white):
+    """refine vertical position"""
     img = np.copy(frame[y1:y2, x1:x2])    
     if not text_white: img = cv2.bitwise_not(img)
         
@@ -176,6 +183,7 @@ def find_x_position(frame, x1, x2, y1, y2, text_white):
     return l[0], l[-1]
 
 def find_y_position(frame, x1, x2, y1, y2, text_white):
+    """refine horizontal position"""
     img = np.copy(frame[y1:y2, x1:x2])    
     if not text_white: img = cv2.bitwise_not(img)
     
@@ -204,6 +212,7 @@ def find_y_position(frame, x1, x2, y1, y2, text_white):
 
 
 def spatial_detection_LOOV(frame, applyMask, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText, marginCoarseDetectionX, marginCoarseDetectionY, minRatioWidthHeight):
+    """Spatial detection on boxes in a frame"""
     boxesDetected = []
     # for each connected component
     contours = find_connected_component(frame, applyMask, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText)
@@ -239,6 +248,7 @@ def spatial_detection_LOOV(frame, applyMask, mask, height, width, thresholdSobel
 
 
 def find_existing_boxes(x1, y1, x2, y2, imageQueue, frameId, boxes, tolBox, maxValDiffBetween2boxes):
+    """Find if a bouding box in a frame correspond to an existing box"""
     for b in boxes:
         if b.finish: continue
 
@@ -267,6 +277,7 @@ def find_existing_boxes(x1, y1, x2, y2, imageQueue, frameId, boxes, tolBox, maxV
     return False
 
 def temporal_detection(boxesDetected, boxes, imageQueue, frameId, maxGapBetween2frames, tolBox, maxValDiffBetween2boxes):
+    """Find for each bounding box if the text has already find in previous image, else create a new box """
     # if new boxes correspond to existing boxes, add to them, else create a new one
     newBoxes = []
     for x1, y1, x2, y2 in boxesDetected:
@@ -287,6 +298,3 @@ def temporal_detection(boxesDetected, boxes, imageQueue, frameId, maxGapBetween2
         if frameId - b.lframeId[-1] > maxGapBetween2frames: b.finish = True
 
     return boxes
-
-
-

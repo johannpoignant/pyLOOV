@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# encoding: utf-8
+
 """
 Video text extractor
 
@@ -34,6 +37,7 @@ import numpy as np
 import cv, cv2
 import os, sys
 from collections import deque
+import io, json
 
 from text_detection import *
 
@@ -184,8 +188,8 @@ if __name__ == '__main__':
         for b in boxesFinal:
             d[i] = b.OCR(freqReco, tess, resizeOCRImage, i)
             i+=1
-
     # save the output in json format
-    with open(output, 'w') as f:
-        json.dump(d, f, sort_keys = True, indent = 4)
+    with io.open(output, 'w', encoding='utf-8') as f:
+        #json.dump(d, f, sort_keys = True, indent = 4)
+        f.write(unicode(json.dumps(d, ensure_ascii=False)))
 
