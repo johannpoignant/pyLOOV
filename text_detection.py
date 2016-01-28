@@ -127,13 +127,13 @@ def find_connected_component(frame, applyMask, mask, height, width, thresholdSob
     img = cv2.erode(img, kernel, iterations = int(round(yMinSizeText/4.0)))
     img = cv2.dilate(img, kernel, iterations = int(round(yMinSizeText/4.0)))
 
-    # find contour
+    # find white block corresponding to text via contour
     contours, _ = cv2.findContours(img, cv.CV_RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     return  contours  
 
-def text_white_or_black(frame, x1, y1, x2, y2):
-    """find if the text is write in black or in white"""
+def text_is_white(frame, x1, y1, x2, y2):
+    """Is the text is write in white on black background"""
     blocksize = y2-y1
     if (blocksize%2 == 0): blocksize+=1
     
@@ -141,8 +141,9 @@ def text_white_or_black(frame, x1, y1, x2, y2):
     img1 = np.copy(frame[y1:y2, x1:x2])    
     img1 = cv2.adaptiveThreshold(img1,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, blocksize, 2)
     cv2.rectangle(img1, (0,0), (x2-x1, y2-y1), 0, 1, 1, 0)
-
+    # label each connected component
     label_cc1, nb_cc1 = ndimage.label(img1)   
+    # count the size of the connected component
     size_cc1 = np.bincount(label_cc1.ravel())[1:]
     
     # compute standard deviation if the text is write in black
@@ -150,10 +151,12 @@ def text_white_or_black(frame, x1, y1, x2, y2):
     img2 = cv2.bitwise_not(img2)    
     img2 = cv2.adaptiveThreshold(img2,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, blocksize, 2)
     cv2.rectangle(img2, (0,0), (x2-x1, y2-y1), 255, 1, 1, 0)
-
+    # label each connected component
     label_cc2, nb_cc2 = ndimage.label(img2)    
+    # count the size of the connected component
     size_cc2 = np.bincount(label_cc2.ravel())[1:]    
 
+    # if the standard deviation of the different cc1 is higher than for cc2, the text is write in black
     if np.std(size_cc1) > np.std(size_cc2):  # reverse the image
         return False
     return True
@@ -165,9 +168,10 @@ def find_x_position(frame, x1, x2, y1, y2, text_white):
         
     _, img = cv2.threshold(img, sauvola(img), 255, cv.CV_THRESH_BINARY)
 
+    # process an horizontal dilation and find the biggest white block
     kernel = np.array(([1], [1], [1]),np.uint8)
     img = cv2.dilate(img, kernel, iterations = x2-x1)
-    img = img[0]
+    img = img[0]    
     findRow = False
     l, lTmp = [], []
     for i in range(len(img)):
@@ -193,6 +197,7 @@ def find_y_position(frame, x1, x2, y1, y2, text_white):
     img = cv2.dilate(img, kernel, iterations = x2-x1)
     img = img[:,0]
     
+    # process a vertical dilation and find the begining of the first block after a black box, same for the last block
     findLine = False
     start, end = 0, 0
     l = []
@@ -221,11 +226,10 @@ def spatial_detection_LOOV(frame, applyMask, mask, height, width, thresholdSobel
         x1, y1 = c.min(axis=0)[0]
         x2, y2 = c.max(axis=0)[0]
 
+        # check if the height of the box is bigger than the threshold
         if y2-y1 < yMinSizeText: continue
         
-        text_white = text_white_or_black(frame, x1, y1, x2, y2)
-            
-        # refine detection
+        # enlarge position with a marging
         margeH = marginCoarseDetectionX * float(y2-y1)
         margeW = marginCoarseDetectionY * float(y2-y1)
         
@@ -233,10 +237,15 @@ def spatial_detection_LOOV(frame, applyMask, mask, height, width, thresholdSobel
         x2 = min(width, int(round(x2+margeH)))
         y1 = max(0, int(round(y1-margeW)))
         y2 = min(height, int(round(y2+margeW)))
+
+        # find if the text is write on black background
+        text_white = text_is_white(frame, x1, y1, x2, y2)
         
+        # refine vertical position
         y1, y2 = find_y_position(frame, x1, x2, y1, y2, text_white)
         if y2-y1 < yMinSizeText: continue
         
+        # refine horizontal position
         x1, x2 = find_x_position(frame, x1, x2, y1, y2, text_white)
         if x2-x1 < xMinSizeText: continue
 
@@ -252,7 +261,7 @@ def find_existing_boxes(x1, y1, x2, y2, imageQueue, frameId, boxes, tolBox, maxV
     for b in boxes:
         if b.finish: continue
 
-        # compare position
+        # compare position to existing boxes
         x1Inter = max(x1, b.meanx1)
         y1Inter = max(y1, b.meany1)
         x2Inter = min(x2, b.meanx2)

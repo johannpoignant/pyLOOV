@@ -188,8 +188,8 @@ if __name__ == '__main__':
         for b in boxesFinal:
             d[i] = b.OCR(freqReco, tess, resizeOCRImage, i)
             i+=1
+    
     # save the output in json format
     with io.open(output, 'w', encoding='utf-8') as f:
-        #json.dump(d, f, sort_keys = True, indent = 4)
         f.write(unicode(json.dumps(d, sort_keys = True, indent = 4, ensure_ascii=False)))
 
