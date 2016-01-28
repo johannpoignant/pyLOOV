@@ -42,7 +42,7 @@ class box:
         self.meany2 = (self.meany2 * self.nbDetected + float(y2)) / (self.nbDetected+1)
         self.nbDetected += 1
 
-    def OCR(self, freqReco, tess, resizeOCRImage):
+    def OCR(self, freqReco, tess, resizeOCRImage, idBoxes):
         d = {}
         d["x"] = self.meanx1
         d["y"] = self.meany1
@@ -52,6 +52,8 @@ class box:
         # process OCR on mean images
         img = np.array(np.average(np.array(self.lframe), axis=0), dtype=np.uint8)
         img = cv2.resize(img, (self.lenghtInter, resizeOCRImage) , interpolation=cv2.INTER_CUBIC)
+        _, img = cv2.threshold(img, sauvola(img), 255, cv.CV_THRESH_BINARY)
+
         tess.set_image(img)
         d["transcriptions"] = {}
         d["confidences"] = {}
@@ -62,20 +64,20 @@ class box:
         for i in range(int(len(self.lframe)/freqReco)):
             img = np.array(np.average(np.array(self.lframe[i*freqReco:(i+1)*freqReco]), axis=0), dtype=np.uint8)
             img = cv2.resize(img, (self.lenghtInter, resizeOCRImage) , interpolation=cv2.INTER_CUBIC)
+            _, img = cv2.threshold(img, sauvola(img), 255, cv.CV_THRESH_BINARY)
             tess.set_image(img)
             d["transcriptions"][str(self.lframeId[i*freqReco])+"_to_"+str(self.lframeId[(i+1)*freqReco-1])] = tess.get_utf8_text().replace('\n', '')
             d["confidences"][str(self.lframeId[i*freqReco])+"_to_"+str(self.lframeId[(i+1)*freqReco-1])] = [int(round(c.confidence, 0)) for c in tess.symbols()]
-            #transcriptions.append(tess.get_utf8_text().replace('\n', ''))
-            #confidences.append([int(round(c.confidence, 0)) for c in tess.symbols()])
 
+        # process the last intermediate images
         if (i+1)*freqReco < len(self.lframe):
             img = np.array(np.average(np.array(self.lframe[(i+1)*freqReco:]), axis=0), dtype=np.uint8)
             img = cv2.resize(img, (self.lenghtInter, resizeOCRImage) , interpolation=cv2.INTER_CUBIC)
+            _, img = cv2.threshold(img, sauvola(img), 255, cv.CV_THRESH_BINARY)
             tess.set_image(img)
             d["transcriptions"][str(self.lframeId[(i+1)*freqReco])+"_to_"+str(self.lframeId[-1])] = tess.get_utf8_text().replace('\n', '')
             d["confidences"][str(self.lframeId[(i+1)*freqReco])+"_to_"+str(self.lframeId[-1])] = [int(round(c.confidence, 0)) for c in tess.symbols()]
-            #transcriptions.append(tess.get_utf8_text().replace('\n', ''))
-            #confidences.append([int(round(c.confidence, 0)) for c in tess.symbols()])
+
         return d
 
     def __repr__(self):
@@ -90,31 +92,34 @@ def sauvola(img):
     else:              mean = 255 - mean
     return 255-round(mean*(1+0.5*(np.std(img.ravel()) /127.5 - 1)), 0)
 
-def find_connected_component(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText):
+def find_connected_component(frame, applyMask, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText):
+    # find vertical edge of characters
     img = cv2.Sobel(frame, cv.CV_8U, 1, 0, ksize=1)
+    cv2.rectangle(img, (0,0), (width, height), (0,0,0), 2, 4, 0)
+
+    # apply mask
+    if applyMask: img = cv2.bitwise_and(img, img, mask = mask)
+
+    # binarized the image    
     img = cv2.convertScaleAbs(img)
     _, img = cv2.threshold(img, thresholdSobel, 255, cv.CV_THRESH_BINARY)
 
-    # connect character
+    # connect character together
     kernel = np.array(((0, 0, 0), (1, 1, 1), (0, 0, 0)),np.uint8)
     img = cv2.dilate(img, kernel, iterations = itConnectedCaractere)
     img = cv2.erode(img, kernel, iterations = itConnectedCaractere)
 
-    # delete horizontal bar
+    # filter alone horizontal bars
     cv2.rectangle(img, (0,0), (width, height), (0,0,0), 2, 4, 0)
     kernel = np.array(((0, 0, 0), (1, 1, 1), (0, 0, 0)),np.uint8)
     img = cv2.erode(img, kernel, iterations = int(round(float(xMinSizeText)/4.)))
     img = cv2.dilate(img, kernel, iterations = int(round(float(xMinSizeText)/4.)))
 
-    # delete vertical bar
+    # filter alone vertical bars
     cv2.rectangle(img, (0,0), (width, height), (0,0,0), 2, 4, 0)
     kernel = np.array(([1], [1], [1]),np.uint8)
     img = cv2.erode(img, kernel, iterations = int(round(yMinSizeText/4.0)))
     img = cv2.dilate(img, kernel, iterations = int(round(yMinSizeText/4.0)))
-
-    # apply mask
-    if mask: img = cv2.bitwise_and(img, mask)
-    cv2.rectangle(img, (0,0), (width, height), (0,0,0), 2, 4, 0)
 
     # find contour
     contours, _ = cv2.findContours(img, cv.CV_RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
@@ -198,14 +203,16 @@ def find_y_position(frame, x1, x2, y1, y2, text_white):
     return sorted(l, reverse = True)[0][1:]
 
 
-def spatial_detection_LOOV(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText, marginCoarseDetectionX, marginCoarseDetectionY, minRatioWidthHeight):
+def spatial_detection_LOOV(frame, applyMask, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText, marginCoarseDetectionX, marginCoarseDetectionY, minRatioWidthHeight):
     boxesDetected = []
     # for each connected component
-    contours = find_connected_component(frame, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText)
+    contours = find_connected_component(frame, applyMask, mask, height, width, thresholdSobel, itConnectedCaractere, yMinSizeText, xMinSizeText)
     for c in contours:
         c = np.array(c)
         x1, y1 = c.min(axis=0)[0]
         x2, y2 = c.max(axis=0)[0]
+
+        if y2-y1 < yMinSizeText: continue
         
         text_white = text_white_or_black(frame, x1, y1, x2, y2)
             
